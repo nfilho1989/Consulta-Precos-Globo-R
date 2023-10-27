@@ -1,0 +1,299 @@
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(urltools)
+library(RODBC)
+library(lubridate)
+library(googlesheets4)
+library(tidyverse)
+
+# Define o URL da API e as credenciais de usuário e senha
+url1 <- "https://api.prd.negocios.tvglobo.com.br/mktsales/pricing/external/grid"
+url2 <- "https://api.prd.negocios.tvglobo.com.br/mktsales/pricing/external/price"
+user <- "####"
+password <- "####"
+
+# Realiza a consulta HTTP
+headers <- c(
+  "accept" = "application/json",
+  "x-api-key" = "####"
+)
+
+
+# Obter a data atual
+data_atual <- Sys.Date()
+
+# Obter o mês atual
+mes_atual <- month(data_atual)
+
+# Obter o ano atual
+ano_atual <- year(data_atual)
+
+# Calcular o próximo mês e ajustar o ano, se necessário
+mes_proximo <- mes_atual + 1
+ano_proximo <- ano_atual
+
+if (mes_proximo > 12) {
+  mes_proximo <- 1
+  ano_proximo <- ano_atual + 1
+}
+
+# Construir a data do primeiro dia do próximo mês
+primeiro_dia_proximo_mes <- make_date(ano_proximo, mes_proximo, 1)
+
+# Formatar a data no formato desejado (dd/mm/yyyy 00:00:00)
+data_inicial_formatada <- sprintf("%02d/%02d/%04d 00:00:00", day(primeiro_dia_proximo_mes), month(primeiro_dia_proximo_mes), year(primeiro_dia_proximo_mes))
+
+# Dia 15 do próximo mês
+dia_meio_mes <- make_date(ano_proximo, mes_proximo, 15)
+
+# Formatar a data no formato desejado (dd/mm/yyyy 00:00:00)
+data_meio_mes_formatada <- sprintf("%02d/%02d/%04d 00:00:00", day(dia_meio_mes), month(dia_meio_mes), year(dia_meio_mes))
+
+# Dia 16 do próximo mês
+dia_meio_mes_2 <- make_date(ano_proximo, mes_proximo, 16)
+
+# Formatar a data no formato desejado (dd/mm/yyyy 00:00:00)
+data_meio_mes_formatada_2 <- sprintf("%02d/%02d/%04d 00:00:00", day(dia_meio_mes_2), month(dia_meio_mes_2), year(dia_meio_mes_2))
+
+# Obter o último dia do próximo mês
+ultimo_dia_proximo_mes <- ceiling_date(primeiro_dia_proximo_mes, unit = "month") - days(1)
+
+# Formatar a data no formato desejado (dd/mm/yyyy 00:00:00)
+data_final_mes_formatada <- sprintf("%02d/%02d/%04d 00:00:00", day(ultimo_dia_proximo_mes), month(ultimo_dia_proximo_mes), year(ultimo_dia_proximo_mes))
+
+# Realizar a primeira consulta (de 1 a 15 do próximo mês)
+response1 <- httr::GET(
+  url1,
+  authenticate(user, password, type = "basic"),
+  add_headers(headers),
+  query = list(canal = "1",
+               abrangencia = "JP",
+               dataInicial = data_inicial_formatada,
+               dataFinal = data_meio_mes_formatada
+  )
+)
+
+# Nesse momento os dados da primeira requisição estão contidos em um Unicode bruto, sendo necessário converter seu conteúdo para um vetor de caracteres.
+content_text1 <- rawToChar(response1$content)
+
+
+# Convertendo a estrutura JSON no formato caratere para um objeto do R
+grade_programas_1 <- fromJSON(content_text1, flatten = TRUE)
+
+
+# Criando objeto lista_programas com valores únicos da coluna mnemonicoPrograma
+lista_programas_1 <- unique(grade_programas_1$mnemonicoPrograma)
+
+
+# Realizar a primeira consulta (de 16 a último dia do próximo mês)
+response2 <- httr::GET(
+  url1,
+  authenticate(user, password, type = "basic"),
+  add_headers(headers),
+  query = list(canal = "1",
+               abrangencia = "JP",
+               dataInicial = data_meio_mes_formatada_2,
+               dataFinal = data_final_mes_formatada
+  )
+)
+
+# Nesse momento os dados da primeira requisição estão contidos em um Unicode bruto, sendo necessário converter seu conteúdo para um vetor de caracteres.
+content_text2 <- rawToChar(response2$content)
+
+
+# Convertendo a estrutura JSON no formato caratere para um objeto do R
+grade_programas_2 <- fromJSON(content_text2, flatten = TRUE)
+
+
+# Criando objeto lista_programas com valores únicos da coluna mnemonicoPrograma
+lista_programas_2 <- unique(grade_programas_2$mnemonicoPrograma)
+
+# Juntar as listas lista_programas1 e lista_programas2
+lista_programas <- union(lista_programas_1, lista_programas_2)
+
+lista_programas <- unique(lista_programas)
+
+
+# Consolidar os dataframes 'grade_programas_1' e 'grade_programas_2'
+grade_programas <- bind_rows(grade_programas_1, grade_programas_2)
+
+# Inicializar o dataframe df_resultado
+df_resultado <- data.frame(programa = character(),
+                           abrangencia = character(),
+                           secundagem = character(),
+                           exibicao = character(),
+                           preco = character(),
+                           stringsAsFactors = FALSE)
+
+# Formatar a data de compra no formato desejado (dd/mm/yyyy)
+data_de_compra <- sprintf("%02d/%02d/%04d", day(primeiro_dia_proximo_mes), month(primeiro_dia_proximo_mes), year(primeiro_dia_proximo_mes))
+
+# Formatar a data de exibição II no formato desejado (dd/mm/yyyy)
+mes_proximo_II <- mes_atual + 2
+primeiro_dia_proximo_mes_II <- make_date(ano_proximo, mes_proximo_II, 1)
+data_de_exibicao_II <- sprintf("%02d/%02d/%04d", day(primeiro_dia_proximo_mes_II), month(primeiro_dia_proximo_mes_II), year(primeiro_dia_proximo_mes_II))
+
+# Formatar a data de exibição III no formato desejado (dd/mm/yyyy)
+mes_proximo_III <- mes_atual + 3
+primeiro_dia_proximo_mes_III <- make_date(ano_proximo, mes_proximo_III, 1)
+data_de_exibicao_III <- sprintf("%02d/%02d/%04d", day(primeiro_dia_proximo_mes_III), month(primeiro_dia_proximo_mes_III), year(primeiro_dia_proximo_mes_III))
+
+# Formatar a data de exibição IV no formato desejado (dd/mm/yyyy)
+mes_proximo_IV <- mes_atual + 4
+primeiro_dia_proximo_mes_IV <- make_date(ano_proximo, mes_proximo_IV, 1)
+data_de_exibicao_IV <- sprintf("%02d/%02d/%04d", day(primeiro_dia_proximo_mes_IV), month(primeiro_dia_proximo_mes_IV), year(primeiro_dia_proximo_mes_IV))
+
+# Define as datas de compra e exibição no formato correto
+lista_data_exibicao <- c(data_de_compra,data_de_exibicao_II,data_de_exibicao_III,data_de_exibicao_IV)
+
+# Define a abrangência e secundagem padrão
+lista_abrangencia <- c("JP", "CPG")
+lista_secundagem <- c("10", "15", "30", "45", "60")
+
+
+# Loop sobre a data de exibição
+for (e in lista_data_exibicao) {
+  # Loop sobre os valores de secundagem
+  for (s in lista_secundagem) {
+    # Loop sobre as abrangências
+    for (a in lista_abrangencia) {
+      # Loop sobre as abrangências
+      for (p in lista_programas) {
+        # Loop sobre os programas da lista
+        params <- list(
+          compra = data_de_compra,
+          exibicao = e,
+          programa = p,
+          abrangencia = a,
+          secundagem = s
+        )
+        
+        # Faz a consulta GET com os parâmetros definidos
+        response <- GET(
+          url2,
+          authenticate(user, password, type = "basic"),
+          add_headers(headers),
+          query = params
+        )
+        
+        # Imprime a URL e a resposta para depurar possíveis problemas
+        cat("URL: ", response$url, "\n")
+        cat("Resposta: ", content(response, "text"), "\n")
+        
+        # Verifica se a consulta foi bem sucedida
+        if (status_code(response) == 200) {
+          # Extrai o preço da resposta da consulta
+          preco_t <- rawToChar(response$content)
+          
+          # Convertendo a estrutura JSON no formato caratere para um objeto do R
+          preco <- fromJSON(preco_t, flatten = TRUE)
+          
+          # Verifica o comprimento do preço
+          if (length(preco) != 1) {
+            preco <- NA
+          }
+          
+          # Adiciona uma nova linha ao dataframe de resultado
+          nova_linha <- data.frame(
+            programa = p,
+            abrangencia = a,
+            secundagem = s,
+            exibicao = e,
+            preco = preco,
+            stringsAsFactors = FALSE
+          )
+          df_resultado <- rbind(df_resultado, nova_linha)
+          
+          # Imprime a URL e a resposta para depuração
+          cat("Consulta para o programa ", p, " com secundagem ", s, " e abrangência ", a, ": ", urltools::url_parse(response$url)$path, "\n")
+          cat("Resposta: ", preco, "\n")
+        } else {
+          # Em caso de erro, adiciona uma nova linha ao dataframe de resultado com o motivo do erro
+          nova_linha <- data.frame(
+            programa = p,
+            abrangencia = a,
+            secundagem = s,
+            exibicao = e,
+            preco = NA,
+            motivo_erro = content(response, "text"),
+            stringsAsFactors = FALSE
+          )
+          df_resultado <- rbind(df_resultado, nova_linha)
+          
+          # Imprime a URL e o motivo do erro para depuração
+          cat("Erro na consulta para o programa ", p, " com secundagem ", s, " e abrangência ", a, ": ", content(response, "text"), "\n")
+        }
+      }
+    }
+  }
+}
+
+# Converter a coluna de preço para string e substituir a vírgula por ponto
+df_resultado$preco <- as.character(df_resultado$preco)
+df_resultado$preco <- gsub(",", ".", df_resultado$preco)
+
+
+
+# Adiciona a coluna concatenada
+df_resultado$concatenado <- paste(df_resultado$programa, df_resultado$secundagem, format(as.Date(df_resultado$exibicao, "%d/%m/%Y"), "%m/%Y"), sep = " - ")
+
+# Adicionando a coluna descrição
+df_resultado$descricao <- ifelse(df_resultado$abrangencia == "JP",
+                                 paste("Tabela de Preço TV Cabo Branco", 
+                                       format(as.Date(data_de_compra, "%d/%m/%Y"), "%m/%Y"), 
+                                       sep = " - "),
+                                 ifelse(df_resultado$abrangencia == "CPG",
+                                        paste("Tabela de Preço TV Paraíba", 
+                                              format(as.Date(data_de_compra, "%d/%m/%Y"), "%m/%Y"), 
+                                              sep = " - "),
+                                        ""))
+
+
+# Adicionando a coluna empresa
+df_resultado$empresa <- ifelse(df_resultado$abrangencia == "JP",
+                               paste("TV Cabo Branco"),
+                               ifelse(df_resultado$abrangencia == "CPG",
+                                      paste("TV Paraíba"),
+                                      ""))
+
+# Adicionando a coluna IsActive
+df_resultado$IsActive <- "VERDADEIRO"
+
+
+# Criando um novo dataframe apenas com as linhas que não possuem NA na coluna 'preco'
+df_resultado <- df_resultado[complete.cases(df_resultado$preco),]
+
+# Criação das colunas 'diaSemana', 'horaInicial' e 'horaFinal' após o loop
+df_resultado$diaSemana <- grade_programas$diaSemana[match(df_resultado$programa, grade_programas$mnemonicoPrograma)]
+df_resultado$horaInicial <- grade_programas$horaInicial[match(df_resultado$programa, grade_programas$mnemonicoPrograma)]
+df_resultado$horaFinal <- grade_programas$horaFinal[match(df_resultado$programa, grade_programas$mnemonicoPrograma)]
+
+
+###  A D I C I O N A N D O   A U D I Ê N C I A 
+
+#Buscando as audiências dos programas em uma tabela no Google Sheets
+library(googlesheets4)
+library(googledrive)
+tabela_audiencia <- read_sheet("https://docs.google.com/spreadsheets/d/###", sheet = "Tabela_Audiencia") # Importando gs1 atraves do ID
+1
+
+# Verificar correspondências entre as colunas "programa" e "empresa" da tabela_audiencia e df_resultado
+df_resultado$Rat_Audiencia__c <- sapply(seq_len(nrow(df_resultado)), function(i) {
+  programa <- df_resultado[i, "programa"]
+  empresa <- df_resultado[i, "empresa"]
+  
+  # Verificar se há correspondência na tabela_audiencia
+  match_row <- tabela_audiencia$programas == programa & tabela_audiencia$empresa == empresa
+  
+  if (any(match_row)) {
+    # Se houver correspondência, retornar o valor de Rat_Audiencia__c
+    return(tabela_audiencia$Rat_Audiencia__c[match_row])
+  } else {
+    # Se não houver correspondência, retornar 0
+    return(0)
+  }
+})
+
+
+df_resultado <- df_resultado %>% arrange(concatenado)
